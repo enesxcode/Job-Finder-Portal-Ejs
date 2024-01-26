@@ -1,0 +1,5 @@
+services:
+  - name: server.js  # Replace with your desired app name
+    env:
+      - key: NODE_ENV
+        value: production
