@@ -1,47 +1,83 @@
+const path = require('path');
 const express = require('express');
+const compression = require('compression');
+const helmet = require('helmet');
+
 const app = express();
 const port = process.env.PORT || 3500;
+const isProd = process.env.NODE_ENV === 'production';
 
 app.set('view engine', 'ejs');
-app.use(express.static(__dirname + '/public'));
+app.set('views', path.join(__dirname, 'views'));
 
-app.get('/', (req, res) => {
-    res.render('index');
-});
+// Trust the platform's reverse proxy (Render, Heroku, etc.) so req.ip / https
+// detection works correctly.
+app.set('trust proxy', 1);
 
-app.get('/about', (req, res) => {
-    res.render('about');
-});
+// Security headers. CSP is relaxed for inline styles/scripts and the map
+// embed used by this template rather than left off entirely.
+app.use(
+    helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'", "'unsafe-inline'"],
+                styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+                fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+                imgSrc: ["'self'", 'data:'],
+                frameSrc: ["'self'", 'https://maps.google.com'],
+            },
+        },
+    })
+);
 
-app.get('/contact', (req, res) => {
-    res.render('contact');
-});
+// Gzip/Brotli-eligible compression for all responses.
+app.use(compression());
 
-app.get('/blog', (req, res) => {
-    res.render('blog');
-});
+// Static assets: long-lived cache since filenames don't change between
+// deploys in this template. Bump maxAge or add cache-busting filenames if
+// assets start changing more frequently.
+app.use(
+    express.static(path.join(__dirname, 'public'), {
+        maxAge: isProd ? '30d' : 0,
+        etag: true,
+    })
+);
 
-app.get('/elements', (req, res) => {
-    res.render('elements');
-});
+// Route table: page name -> EJS view. Keeps the growing list of static
+// pages in one place instead of a repeated app.get block per page.
+const pages = {
+    '/': 'index',
+    '/about': 'about',
+    '/contact': 'contact',
+    '/blog': 'blog',
+    '/elements': 'elements',
+    '/job_details': 'job_details',
+    '/job_listing': 'job_listing',
+    '/single-blog': 'single-blog',
+};
 
-app.get('/job_details', (req, res) => {
-    res.render('job_details');
-});
+for (const [route, view] of Object.entries(pages)) {
+    app.get(route, (req, res) => res.render(view));
+}
 
-app.get('/job_listing', (req, res) => {
-    res.render('job_listing');
-});
-
-app.get('/single-blog', (req, res) => {
-    res.render('single-blog');
-});
-
-// Handle 404 error - Page not found
+// 404
 app.use((req, res) => {
     res.status(404).send('Page not found');
 });
 
-app.listen(port, () => {
+// Centralized error handler
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send('Something went wrong');
+});
+
+const server = app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
 });
+
+// Graceful shutdown
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+process.on('SIGINT', () => server.close(() => process.exit(0)));
+
+module.exports = app;
